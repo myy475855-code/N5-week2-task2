@@ -1,0 +1,451 @@
+openapi: 3.0.3
+info:
+  title: TalentBridge Internships API
+  version: 1.0.0
+  description: |
+    REST API for internship postings and student applications.
+
+    **Conventions**
+    - Success bodies: `{ "data": ... }`; lists add `{ "meta": { page, limit, total, totalPages } }`.
+    - Every error: `{ "error": { "code", "message", "details?" } }`.
+    - `422` = syntactically valid JSON that fails validation. `400` = malformed JSON.
+    - `409` = request is valid but conflicts with current resource state.
+    - Authentication (401/403) is not implemented yet; planned for a later task.
+servers:
+  - url: http://localhost:3000
+tags:
+  - name: Internships
+  - name: Applications
+  - name: System
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Liveness check
+      operationId: health
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, example: ok }
+
+  /internships:
+    get:
+      tags: [Internships]
+      summary: List internships (filter, sort, paginate)
+      operationId: listInternships
+      parameters:
+        - { name: location, in: query, schema: { type: string }, description: Case-insensitive substring match }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/InternshipStatus' } }
+        - { name: q, in: query, schema: { type: string, maxLength: 100 }, description: Search title, company, description }
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [createdAt, title, stipend, deadline], default: createdAt }
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: A page of internships
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Internship' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Internships]
+      summary: Create an internship
+      operationId: createInternship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InternshipInput' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location: { schema: { type: string, example: /internships/3f1c... } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternshipEnvelope' }
+        '400': { $ref: '#/components/responses/InvalidJson' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /internships/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      tags: [Internships]
+      summary: Get one internship
+      operationId: getInternship
+      responses:
+        '200':
+          description: The internship
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternshipEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [Internships]
+      summary: Replace an internship (idempotent full update)
+      operationId: replaceInternship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InternshipInput' }
+      responses:
+        '200':
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternshipEnvelope' }
+        '400': { $ref: '#/components/responses/InvalidJson' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [Internships]
+      summary: Partially update an internship
+      operationId: patchInternship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InternshipPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InternshipEnvelope' }
+        '400': { $ref: '#/components/responses/InvalidJson' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Internships]
+      summary: Delete an internship (cascades to its applications)
+      operationId: deleteInternship
+      responses:
+        '204': { description: Deleted, no content }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /internships/{id}/applications:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      tags: [Applications]
+      summary: List applications for an internship
+      operationId: listApplications
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ApplicationStatus' } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: A page of applications, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Application' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Applications]
+      summary: Submit an application
+      description: |
+        New applications start as `submitted`.
+        Returns `409` if the internship is closed (`INTERNSHIP_CLOSED`), its deadline passed
+        (`APPLICATION_DEADLINE_PASSED`), or the same email already applied (`DUPLICATE_APPLICATION`).
+      operationId: createApplication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplicationInput' }
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location: { schema: { type: string, example: /applications/9b2e... } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationEnvelope' }
+        '400': { $ref: '#/components/responses/InvalidJson' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /applications/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    get:
+      tags: [Applications]
+      summary: Get one application (includes status history)
+      operationId: getApplication
+      responses:
+        '200':
+          description: The application
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationEnvelope' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /applications/{id}/status:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+    patch:
+      tags: [Applications]
+      summary: Move an application to a new status
+      description: |
+        Allowed transitions: `submitted → under_review`, `under_review → accepted | rejected`.
+        `accepted` and `rejected` are final. Anything else (including re-sending the current
+        status) returns `409 ILLEGAL_STATUS_TRANSITION`.
+      operationId: updateApplicationStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StatusUpdate' }
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationEnvelope' }
+        '400': { $ref: '#/components/responses/InvalidJson' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    InvalidJson:
+      description: Malformed JSON body
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INVALID_JSON, message: Request body is not valid JSON } }
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request validation failed
+              details:
+                - { location: body, path: applicantEmail, message: Invalid email, code: invalid_string }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTERNSHIP_NOT_FOUND, message: "Internship with id '...' was not found" } }
+    Conflict:
+      description: Request conflicts with current state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: ILLEGAL_STATUS_TRANSITION
+              message: "Cannot change application status from 'accepted' to 'submitted'. 'accepted' is a final status."
+              details: { from: accepted, to: submitted, allowed: [] }
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: { code: INTERNAL_ERROR, message: An unexpected error occurred } }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: Stable machine-readable code }
+            message: { type: string, description: Human-readable explanation }
+            details: { description: Optional structured context (validation issues, allowed transitions, ...) }
+    PageMeta:
+      type: object
+      required: [page, limit, total, totalPages]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+    Category:
+      type: string
+      enum: [engineering, design, data, product, marketing, finance, operations, other]
+    InternshipStatus:
+      type: string
+      enum: [open, closed]
+    ApplicationStatus:
+      type: string
+      enum: [submitted, under_review, accepted, rejected]
+    Contact:
+      type: object
+      additionalProperties: false
+      required: [name, email]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100 }
+        email: { type: string, format: email }
+    InternshipInput:
+      type: object
+      additionalProperties: false
+      required: [title, company, description, location, category]
+      properties:
+        title: { type: string, minLength: 3, maxLength: 120 }
+        company: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, minLength: 20, maxLength: 5000 }
+        location: { type: string, minLength: 2, maxLength: 120 }
+        category: { $ref: '#/components/schemas/Category' }
+        stipend: { type: number, minimum: 0, maximum: 1000000 }
+        deadline: { type: string, format: date-time }
+        skills:
+          type: array
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 50 }
+        contact: { $ref: '#/components/schemas/Contact' }
+        status: { $ref: '#/components/schemas/InternshipStatus' }
+    InternshipPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Any subset of InternshipInput fields (at least one).
+      properties:
+        title: { type: string, minLength: 3, maxLength: 120 }
+        company: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: string, minLength: 20, maxLength: 5000 }
+        location: { type: string, minLength: 2, maxLength: 120 }
+        category: { $ref: '#/components/schemas/Category' }
+        stipend: { type: number, minimum: 0, maximum: 1000000 }
+        deadline: { type: string, format: date-time }
+        skills:
+          type: array
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 50 }
+        contact: { $ref: '#/components/schemas/Contact' }
+        status: { $ref: '#/components/schemas/InternshipStatus' }
+    Internship:
+      allOf:
+        - $ref: '#/components/schemas/InternshipInput'
+        - type: object
+          required: [id, status, createdAt, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    InternshipEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Internship' }
+    Availability:
+      type: object
+      additionalProperties: false
+      required: [startDate, hoursPerWeek]
+      properties:
+        startDate: { type: string, format: date, example: '2026-06-01' }
+        hoursPerWeek: { type: integer, minimum: 1, maximum: 60 }
+    ApplicationInput:
+      type: object
+      additionalProperties: false
+      required: [applicantName, applicantEmail, resumeUrl]
+      properties:
+        applicantName: { type: string, minLength: 2, maxLength: 100 }
+        applicantEmail: { type: string, format: email }
+        resumeUrl: { type: string, format: uri, maxLength: 500 }
+        coverLetter: { type: string, minLength: 1, maxLength: 5000 }
+        availability: { $ref: '#/components/schemas/Availability' }
+    StatusChange:
+      type: object
+      required: [from, to, at]
+      properties:
+        from: { nullable: true, allOf: [{ $ref: '#/components/schemas/ApplicationStatus' }] }
+        to: { $ref: '#/components/schemas/ApplicationStatus' }
+        at: { type: string, format: date-time }
+        note: { type: string }
+    Application:
+      allOf:
+        - $ref: '#/components/schemas/ApplicationInput'
+        - type: object
+          required: [id, internshipId, status, statusHistory, createdAt, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            internshipId: { type: string, format: uuid }
+            status: { $ref: '#/components/schemas/ApplicationStatus' }
+            statusHistory:
+              type: array
+              items: { $ref: '#/components/schemas/StatusChange' }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    ApplicationEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: '#/components/schemas/Application' }
+    StatusUpdate:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        note: { type: string, minLength: 1, maxLength: 500 }
